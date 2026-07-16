@@ -47,7 +47,7 @@ python -m pytest -q
 python -m pytest --cov=server --cov-report=term-missing
 ```
 
-6. MCP json to used in inference engine
+6. MCP json to use in inference engine
 ```json
 {
   "mcpServers": {
