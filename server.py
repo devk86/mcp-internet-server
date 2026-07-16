@@ -32,6 +32,7 @@ import idna
 import time
 from typing import Any, Dict, List
 from urllib.parse import urlparse
+import asyncio
 
 import httpx
 from bs4 import BeautifulSoup
@@ -388,3 +389,26 @@ def fetch_webpage_content(url: str) -> Dict[str, Any]:
 if __name__ == "__main__":
     # Run the server
     mcp.run()
+
+
+@mcp.tool()
+async def search_internet_async(query: str, max_results: int = 5) -> Dict[str, Any]:
+    """Async wrapper for `search_internet`.
+
+    This convenience wrapper runs the existing synchronous implementation
+    in a threadpool so callers can await it. It preserves the same
+    return shape while providing an async-friendly API.
+    """
+    return await asyncio.to_thread(search_internet, query, max_results)
+
+
+@mcp.tool()
+async def fetch_webpage_content_async(url: str) -> Dict[str, Any]:
+    """Async wrapper for `fetch_webpage_content`.
+
+    For now this runs the stable synchronous implementation in a
+    threadpool so async callers can await it. Future iterations can
+    replace this with a fully async implementation that uses
+    `httpx.AsyncClient` for improved throughput.
+    """
+    return await asyncio.to_thread(fetch_webpage_content, url)
