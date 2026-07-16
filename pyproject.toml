@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-internet-server"
+version = "0.1.0"
+description = "MCP tools to search and fetch web content with SSRF protections"
+readme = "README.md"
+requires-python = ">=3.8"
+
+dependencies = [
+  "fastmcp>=0.1.0",
+  "httpx>=0.23.0",
+  "beautifulsoup4>=4.12.0",
+  "ddgs",
+]
+
+[tool.setuptools]
+package-dir = {"" = ""}
