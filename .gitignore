@@ -19,6 +19,10 @@ server.log
 # pytest cache
 .pytest_cache/
 
+# Coverage and runtime artifacts
+.coverage
+server.jsonl
+
 # IDE/editor files
 .vscode/
 *.swp

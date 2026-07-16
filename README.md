@@ -41,10 +41,17 @@ python run_test.py
 python -m pytest -q
 ```
 
+5. Run test coverage:
+
+```bash
+python -m pytest --cov=server --cov-report=term-missing
+```
+
 Configuration
 
 - `ALLOWED_DOMAINS`: optional comma-separated list of domains that `fetch_webpage_content` is allowed to access. If unset, fetching is allowed for any public hostname (subject to IP checks).
 - `AUDIT_LOG_PATH`: path to write newline-delimited JSON audit events (default: `audit.log`).
+- `METRICS_PORT`: port to expose Prometheus metrics via HTTP. Set to `0` or unset to disable metrics export.
 
 Notes
 

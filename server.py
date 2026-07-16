@@ -87,18 +87,19 @@ if LOG_JSON_PATH:
 
 # Audit log path configurable via environment variable
 AUDIT_LOG_PATH = os.getenv("AUDIT_LOG_PATH", "audit.log")
-METRICS_PORT = int(os.getenv("METRICS_PORT", "8000"))
+METRICS_PORT = int(os.getenv("METRICS_PORT", "0"))
 
 # Prometheus metrics
 REQUEST_COUNTER = Counter("mcp_requests_total", "Total MCP tool requests", ["tool", "ok"])
 REQUEST_LATENCY = Histogram("mcp_request_latency_seconds", "Request latency seconds", ["tool"]) 
 
-# Start Prometheus metrics HTTP server in background
-try:
-    start_http_server(METRICS_PORT)
-    logger.info("Prometheus metrics server started on port %s", METRICS_PORT)
-except Exception:
-    logger.exception("Failed to start Prometheus metrics server")
+# Start Prometheus metrics HTTP server in background when enabled
+if METRICS_PORT > 0:
+    try:
+        start_http_server(METRICS_PORT)
+        logger.info("Prometheus metrics server started on port %s", METRICS_PORT)
+    except Exception:
+        logger.exception("Failed to start Prometheus metrics server")
 
 
 def _audit_event(tool: str, details: Dict[str, Any]) -> None:
