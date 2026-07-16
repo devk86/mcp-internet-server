@@ -41,7 +41,7 @@ try:
 except Exception:
     from duckduckgo_search import DDGS
 from fastmcp import FastMCP
-
+from prometheus_client import Counter, Histogram, start_http_server
 # Initialize the MCP Server
 # The name "InternetAssistant" will be visible to the LLM
 mcp = FastMCP("InternetAssistant")
@@ -62,8 +62,43 @@ if LOG_PATH:
     except Exception:
         logger.exception("Failed to create file log handler")
 
+# Optional structured JSON log file for external ingestion
+LOG_JSON_PATH = os.getenv("LOG_JSON_PATH", "server.jsonl")
+if LOG_JSON_PATH:
+    try:
+        class JsonLineFormatter(logging.Formatter):
+            def format(self, record: logging.LogRecord) -> str:
+                obj = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": record.getMessage(),
+                }
+                if record.exc_info:
+                    obj["exc_info"] = self.formatException(record.exc_info)
+                return json.dumps(obj, ensure_ascii=False)
+
+        jh = RotatingFileHandler(LOG_JSON_PATH, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+        jh.setLevel(logging.INFO)
+        jh.setFormatter(JsonLineFormatter())
+        logging.getLogger().addHandler(jh)
+    except Exception:
+        logger.exception("Failed to create JSON log handler")
+
 # Audit log path configurable via environment variable
 AUDIT_LOG_PATH = os.getenv("AUDIT_LOG_PATH", "audit.log")
+METRICS_PORT = int(os.getenv("METRICS_PORT", "8000"))
+
+# Prometheus metrics
+REQUEST_COUNTER = Counter("mcp_requests_total", "Total MCP tool requests", ["tool", "ok"])
+REQUEST_LATENCY = Histogram("mcp_request_latency_seconds", "Request latency seconds", ["tool"]) 
+
+# Start Prometheus metrics HTTP server in background
+try:
+    start_http_server(METRICS_PORT)
+    logger.info("Prometheus metrics server started on port %s", METRICS_PORT)
+except Exception:
+    logger.exception("Failed to start Prometheus metrics server")
 
 
 def _audit_event(tool: str, details: Dict[str, Any]) -> None:
@@ -108,15 +143,24 @@ def _audit_event(tool: str, details: Dict[str, Any]) -> None:
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
         logger.info("Audit event written: %s", tool)
+        # increment prometheus counter for audit events
+        try:
+            REQUEST_COUNTER.labels(tool=tool, ok="true").inc()
+        except Exception:
+            pass
     except Exception:
         logger.exception("Failed to write audit event for %s", tool)
 
+# (Use REQUEST_COUNTER/REQUEST_LATENCY above for instrumentation)
+
+# Additional Prometheus metrics
+SEARCH_COUNTER = Counter("mcp_search_total", "Total number of search_internet calls", ["ok"])
+FETCH_COUNTER = Counter("mcp_fetch_total", "Total number of fetch_webpage_content calls", ["ok"])
+FETCH_DURATION = Histogram("mcp_fetch_duration_seconds", "Duration of fetch_webpage_content calls in seconds")
+SEARCH_DURATION = Histogram("mcp_search_duration_seconds", "Duration of search_internet calls in seconds")
+
 @mcp.tool()
 def search_internet(query: str, max_results: int = 5) -> Dict[str, Any]:
-    """
-    Searches the internet for a given query and returns a list of 
-    titles, snippets, and URLs. Use this to find information.
-    """
     """Search the web for `query` and return structured results.
 
     Returns a dict with keys:
@@ -132,32 +176,42 @@ def search_internet(query: str, max_results: int = 5) -> Dict[str, Any]:
         _audit_event("search_internet", {"query": query, "max_results": max_results, "ok": False, "error": res["error"]})
         return res
 
-    try:
-        logger.info("Performing search: query=%s max_results=%s", query, max_results)
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
+    with REQUEST_LATENCY.labels(tool="search_internet").time():
+        try:
+            logger.info("Performing search: query=%s max_results=%s", query, max_results)
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=max_results))
 
-        if not results:
-            res = {"ok": True, "results": []}
-            _audit_event("search_internet", {"query": query, "max_results": max_results, "ok": True, "result_count": 0})
+            if not results:
+                SEARCH_COUNTER.labels(ok="true").inc()
+                REQUEST_COUNTER.labels(tool="search_internet", ok="true").inc()
+                res = {"ok": True, "results": []}
+                _audit_event("search_internet", {"query": query, "max_results": max_results, "ok": True, "result_count": 0})
+                return res
+
+            formatted_results: List[Dict[str, Any]] = []
+            for i, item in enumerate(results, 1):
+                formatted_results.append({
+                    "index": i,
+                    "title": item.get("title"),
+                    "snippet": item.get("body"),
+                    "url": item.get("href"),
+                })
+
+            SEARCH_COUNTER.labels(ok="true").inc()
+            REQUEST_COUNTER.labels(tool="search_internet", ok="true").inc()
+            res = {"ok": True, "results": formatted_results}
+            _audit_event("search_internet", {"query": query, "max_results": max_results, "ok": True, "result_count": len(formatted_results)})
             return res
-
-        formatted_results: List[Dict[str, Any]] = []
-        for i, res in enumerate(results, 1):
-            formatted_results.append({
-                "index": i,
-                "title": res.get("title"),
-                "snippet": res.get("body"),
-                "url": res.get("href"),
-            })
-
-        res = {"ok": True, "results": formatted_results}
-        _audit_event("search_internet", {"query": query, "max_results": max_results, "ok": True, "result_count": len(formatted_results)})
-        return res
-    except Exception as e:
-        logger.exception("Error performing search")
-        _audit_event("search_internet", {"query": query, "max_results": max_results, "ok": False, "error": str(e)})
-        return {"ok": False, "error": str(e)}
+        except Exception as e:
+            logger.exception("Error performing search")
+            SEARCH_COUNTER.labels(ok="false").inc()
+            try:
+                REQUEST_COUNTER.labels(tool="search_internet", ok="false").inc()
+            except Exception:
+                pass
+            _audit_event("search_internet", {"query": query, "max_results": max_results, "ok": False, "error": str(e)})
+            return {"ok": False, "error": str(e)}
 
 @mcp.tool()
 def fetch_webpage_content(url: str) -> Dict[str, Any]:
@@ -235,22 +289,23 @@ def fetch_webpage_content(url: str) -> Dict[str, Any]:
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             logger.info("Fetching URL (attempt %s): %s", attempt, url)
-            with httpx.Client(follow_redirects=True, timeout=10.0) as client:
-                # Support both streaming clients and simple clients that only
-                # implement `get()`. Some test doubles provide only `get()`.
-                used_stream = False
-                response_ctx = None
-                # Prefer `get()` when available (test doubles often provide get()).
-                if hasattr(client, "get"):
-                    response = client.get(url, headers=headers)
+            with FETCH_DURATION.time():
+                with httpx.Client(follow_redirects=True, timeout=10.0) as client:
+                    # Support both streaming clients and simple clients that only
+                    # implement `get()`. Some test doubles provide only `get()`.
                     used_stream = False
-                elif hasattr(client, "stream"):
-                    response_ctx = client.stream("GET", url, headers=headers, timeout=10.0, follow_redirects=True, max_redirects=5)
-                    response = response_ctx.__enter__()
-                    used_stream = True
-                else:
-                    # As a final fallback, try calling client.request
-                    response = client.request("GET", url, headers=headers)
+                    response_ctx = None
+                    # Prefer `get()` when available (test doubles often provide get()).
+                    if hasattr(client, "get"):
+                        response = client.get(url, headers=headers)
+                        used_stream = False
+                    elif hasattr(client, "stream"):
+                        response_ctx = client.stream("GET", url, headers=headers, timeout=10.0, follow_redirects=True, max_redirects=5)
+                        response = response_ctx.__enter__()
+                        used_stream = True
+                    else:
+                        # As a final fallback, try calling client.request
+                        response = client.request("GET", url, headers=headers)
 
                 try:
                     response.raise_for_status()
@@ -351,6 +406,7 @@ def fetch_webpage_content(url: str) -> Dict[str, Any]:
 
                     truncated = len(clean_text) > 12000
                     returned_text = clean_text[:12000]
+                    FETCH_COUNTER.labels(ok="true").inc()
                     res = {"ok": True, "url": final_url, "text": returned_text, "truncated": truncated}
                     _audit_event("fetch_webpage_content", {"url": final_url, "hostname": final_hostname, "ok": True, "truncated": truncated})
                     return res
@@ -366,6 +422,7 @@ def fetch_webpage_content(url: str) -> Dict[str, Any]:
             last_exc = e
             # do not retry for 4xx client errors
             if e.response is not None and 400 <= e.response.status_code < 500:
+                FETCH_COUNTER.labels(ok="false").inc()
                 _audit_event("fetch_webpage_content", {"url": url, "hostname": hostname, "ok": False, "error": str(e)})
                 return {"ok": False, "error": f"HTTP error: {str(e)}"}
         except httpx.RequestError as e:
@@ -373,6 +430,7 @@ def fetch_webpage_content(url: str) -> Dict[str, Any]:
             last_exc = e
         except Exception as e:
             logger.exception("Unexpected error fetching URL: %s", url)
+            FETCH_COUNTER.labels(ok="false").inc()
             _audit_event("fetch_webpage_content", {"url": url, "hostname": hostname, "ok": False, "error": str(e)})
             return {"ok": False, "error": str(e)}
 
