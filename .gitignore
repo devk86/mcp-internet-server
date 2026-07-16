@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+
+# Logs and local state
+audit.log
+server.log
+
+# Environment files
+.env
+.env.*
+
+# pytest cache
+.pytest_cache/
+
+# IDE/editor files
+.vscode/
+*.swp
+*.swo
