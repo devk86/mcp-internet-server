@@ -48,7 +48,7 @@ python -m pytest --cov=server --cov-report=term-missing
 ```
 
 6. MCP json to used in inference engine
-'''json
+```json
 {
   "mcpServers": {
     "internet_assistant": {
@@ -59,7 +59,7 @@ python -m pytest --cov=server --cov-report=term-missing
     }
   }
 }
-'''
+```
 Configuration
 
 - `ALLOWED_DOMAINS`: optional comma-separated list of domains that `fetch_webpage_content` is allowed to access. If unset, fetching is allowed for any public hostname (subject to IP checks).
