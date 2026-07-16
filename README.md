@@ -64,4 +64,4 @@ Files of interest
 - `tests/test_server.py` — pytest unit tests
 - `requirements.txt` — dependencies
 
-License: Unspecified
+License: MIT
