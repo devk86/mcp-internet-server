@@ -48,7 +48,7 @@ python -m pytest --cov=server --cov-report=term-missing
 ```
 
 6. MCP json to used in inference engine
-'''
+'''json
 {
   "mcpServers": {
     "internet_assistant": {
